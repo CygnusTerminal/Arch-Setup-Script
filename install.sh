@@ -84,21 +84,12 @@ echo "Creating LUKS Container for the root partition."
 cryptsetup luksFormat --type luks1 $cryptroot
 echo "Opening the newly created LUKS Container."
 cryptsetup open $cryptroot cryptroot
-LUKS="/dev/mapper/cryptroot"
+BTRFS="/dev/mapper/cryptroot"
 
-# Creating LVM volume group
-echo "Creating LVM volume group for root / swap partition"
-pvcreate --dataalignment 1m $LUKS
-vgcreate lvmroot $LUKS
-lvcreate  -L $(free -m | grep -oP '\d+' | head -n 1) lvmroot -n swap
-lvcreate -l 100%FREE lvmroot -n root
-BTRFS="/dev/lvmroot/root"
-
-
-# Formatting the LVM partition as BTRFS.
+# Formatting the LUKS partition as BTRFS.
 #echo "Formatting the LUKS container as BTRFS."
-# mkfs.btrfs $BTRFS &>/dev/null
-# mount -o clear_cache,nospace_cache $BTRFS /mnt
+mkfs.btrfs $BTRFS &>/dev/null
+mount -o clear_cache,nospace_cache $BTRFS /mnt
 
 # Creating BTRFS subvolumes.
 echo "Creating BTRFS subvolumes."
@@ -119,6 +110,7 @@ btrfs su cr /mnt/@/var_spool &>/dev/null
 btrfs su cr /mnt/@/var_lib_gdm &>/dev/null
 btrfs su cr /mnt/@/var_lib_AccountsService &>/dev/null
 btrfs su cr /mnt/@/cryptkey &>/dev/null
+btrfs su cr /mnt/@/swapfile &>/dev/null
 
 chattr +C /mnt/@/boot
 chattr +C /mnt/@/srv
@@ -131,6 +123,7 @@ chattr +C /mnt/@/var_spool
 chattr +C /mnt/@/var_lib_gdm
 chattr +C /mnt/@/var_lib_AccountsService
 chattr +C /mnt/@/cryptkey
+chattr +C /mnt/@/swapfile
 
 #Set the default BTRFS Subvol to Snapshot 1 before pacstrapping
 btrfs subvolume set-default "$(btrfs subvolume list /mnt | grep "@/.snapshots/1/snapshot" | grep -oP '(?<=ID )[0-9]+')" /mnt
@@ -177,17 +170,30 @@ mount -o ssd,noatime,space_cache=v2,autodefrag,compress=zstd:15,discard=async,no
 mount -o ssd,noatime,space_cache=v2,autodefrag,compress=zstd:15,discard=async,nodatacow,nodev,nosuid,noexec,subvol=@/var_lib_gdm $BTRFS /mnt/var/lib/gdm
 mount -o ssd,noatime,space_cache=v2,autodefrag,compress=zstd:15,discard=async,nodatacow,nodev,nosuid,noexec,subvol=@/var_lib_AccountsService $BTRFS /mnt/var/lib/AccountsService
 
-# The encryption is splitted as we do not want to include it in the backup with snap-pac.
+# The encryption is split as we do not want to include it in the backup with snap-pac.
 mount -o ssd,noatime,space_cache=v2,autodefrag,compress=zstd:15,discard=async,nodatacow,nodev,nosuid,noexec,subvol=@/cryptkey $BTRFS /mnt/cryptkey
+mount -o ssd,noatime,space_cache=v2,autodefrag,compress=zstd:15,discard=none,nodatacow,subvol=@/swapfile $BTRFS /mnt/swapfile
 
 mkdir -p /mnt/boot/efi
 mount -o nodev,nosuid,noexec $ESP /mnt/boot/efi
+
+# Swap configuration
+TOTALMEM=$(free -m | awk '/Mem\:/ { print $2 }')
+dd if=/dev/zero of=/swapfile/.swapfile bs=1M count=$TOTALMEM status=progress
+chmod 600 /swapfile/.swapfile
+mkswap /swapfile/.swapfile
+swapon /swapfile/.swapfile
+curl https://raw.githubusercontent.com/osandov/osandov-linux/master/scripts/btrfs_map_physical.c >> btrfs_map_physical.c
+gcc -O2 -o btrfs_map_physical btrfs_map_physical.c
+PHYSICAL_OFFSET=$(btrfs_map_physical /mnt/swapfile/.swapfile | awk 'NR==2 { print $7 }' )
+PAGESIZE=$(getconf PAGESIZE)
+RESUME_OFFSET=$(($PHYSICAL_OFFSET / $PAGESIZE))
 
 kernel_selector
 
 # Pacstrap (setting up a base sytem onto the new root).
 echo "Installing the base system (it may take a while)."
-pacstrap /mnt base ${kernel} ${microcode} linux-firmware grub grub-btrfs snapper snap-pac efibootmgr sudo networkmanager apparmor python-psutil nano gdm gnome-control-center gnome-terminal xorg gnome-tweaks nautilus pipewire-pulse pipewire-alsa pipewire-jack flatpak firewalld lvm2 adobe-source-han-sans-otc-fonts adobe-source-han-serif-otc-fonts gnu-free-fonts reflector mlocate man-db
+pacstrap /mnt base ${kernel} ${microcode} linux-firmware grub grub-btrfs snapper snap-pac efibootmgr sudo networkmanager apparmor python-psutil nano gdm gnome-control-center gnome-terminal xorg gnome-tweaks nautilus pipewire-pulse pipewire-alsa pipewire-jack flatpak firewalld adobe-source-han-sans-otc-fonts adobe-source-han-serif-otc-fonts gnu-free-fonts reflector mlocate man-db
 
 # Routing jack2 through PipeWire.
 echo "/usr/lib/pipewire-0.3/jack" > /mnt/etc/ld.so.conf.d/pipewire-jack.conf
@@ -224,10 +230,10 @@ echo "KEYMAP=$kblayout" > /mnt/etc/vconsole.conf
 # Configuring /etc/mkinitcpio.conf
 echo "Configuring /etc/mkinitcpio for ZSTD compression and LUKS hook."
 sed -i 's,#COMPRESSION="zstd",COMPRESSION="zstd",g' /mnt/etc/mkinitcpio.conf
-sed -i 's,modconf block filesystems keyboard,keyboard modconf block encrypt lvm2 filesystems,g' /mnt/etc/mkinitcpio.conf
+sed -i 's,modconf block filesystems keyboard,keyboard modconf block encrypt filesystems resume,g' /mnt/etc/mkinitcpio.conf
 
 # Enabling LUKS in GRUB and setting the UUID of the LUKS container.
-UUID=$(blkid $cryptroot | cut -f2 -d'"')
+UUID=$(blkid $cryptroot | cut GRUB_CMDLINE-f2 -d'"')
 sed -i 's/#\(GRUB_ENABLE_CRYPTODISK=y\)/\1/' /mnt/etc/default/grub
 echo "" >> /mnt/etc/default/grub
 echo -e "# Booting with BTRFS subvolume\nGRUB_BTRFS_OVERRIDE_BOOT_PARTITION_DETECTION=true" >> /mnt/etc/default/grub
@@ -250,7 +256,7 @@ chmod 755 /mnt/etc/grub.d/*
 dd bs=512 count=4 if=/dev/random of=/mnt/cryptkey/.root.key iflag=fullblock &>/dev/null
 chmod 000 /mnt/cryptkey/.root.key &>/dev/null
 cryptsetup -v luksAddKey /dev/disk/by-partlabel/cryptroot /mnt/cryptkey/.root.key
-sed -i "s#quiet#quiet cryptdevice=UUID=$UUID:cryptroot root=$BTRFS lsm=landlock,lockdown,yama,apparmor,bpf cryptkey=rootfs:/cryptkey/.root.key#g" /mnt/etc/default/grub
+sed -i "s#quiet#quiet resume=$BTRFS cryptdevice=UUID=$UUID:cryptroot root=$BTRFS resume_offset=$RESUME_OFFSET nowatchdog zswap.enabled=1 zswap.compressor=lzo-rle zswap.max_pool_percent=20 zswap.zpool=z3fold lsm=landlock,lockdown,yama,apparmor,bpf cryptkey=rootfs:/cryptkey/.root.key#g" /mnt/etc/default/grub
 sed -i 's#FILES=()#FILES=(/cryptkey/.root.key)#g' /mnt/etc/mkinitcpio.conf
 
 # Configure AppArmor Parser caching
@@ -310,6 +316,14 @@ ipv6.ip6-privacy=2
 EOF
 
 chmod 600 /mnt/etc/NetworkManager/conf.d/ip6-privacy.conf
+
+# Lower Swappiness if system has more than 8GB of RAM
+if $(($TOTALMEM <= 8192)); then ;
+else
+bash -c 'cat > /mnt/etc/sysctl.d/99-swappiness.conf' <<-'EOF'
+vm.swappiness=10
+EOF ;
+fi
 
 # Configuring the system.
 arch-chroot /mnt /bin/bash -e <<EOF
