@@ -182,10 +182,10 @@ mount -o nodev,nosuid,noexec $ESP /mnt/boot/efi
 
 # Swap configuration
 TOTALMEM=$(free -m | awk '/Mem\:/ { print $2 }')
-dd if=/dev/zero of=/swapfile/.swapfile bs=1M count=$TOTALMEM status=progress
+dd if=/dev/zero of=/mnt/swapfile/.swapfile bs=1M count=$TOTALMEM status=progress
 chmod 600 /swapfile/.swapfile
-mkswap /swapfile/.swapfile
-swapon /swapfile/.swapfile
+mkswap /mnt/swapfile/.swapfile
+swapon /mnt/swapfile/.swapfile
 curl https://raw.githubusercontent.com/osandov/osandov-linux/master/scripts/btrfs_map_physical.c >> btrfs_map_physical.c
 gcc -O2 -o btrfs_map_physical btrfs_map_physical.c
 PHYSICAL_OFFSET=$(btrfs_map_physical /mnt/swapfile/.swapfile | awk 'NR==2 { print $7 }' )
