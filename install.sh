@@ -84,12 +84,21 @@ echo "Creating LUKS Container for the root partition."
 cryptsetup luksFormat --type luks1 $cryptroot
 echo "Opening the newly created LUKS Container."
 cryptsetup open $cryptroot cryptroot
-BTRFS="/dev/mapper/cryptroot"
+LUKS="/dev/mapper/cryptroot"
 
-# Formatting the LUKS Container as BTRFS.
-echo "Formatting the LUKS container as BTRFS."
-mkfs.btrfs $BTRFS &>/dev/null
-mount -o clear_cache,nospace_cache $BTRFS /mnt
+# Creating LVM volume group
+echo "Creating LVM volume group for root / swap partition"
+pvcreate --dataalignment 1m $LUKS
+vgcreate lvmroot $LUKS
+lvcreate  -L $(free -m | grep -oP '\d+' | head -n 1) lvmroot -n swap
+lvcreate -l 100%FREE lvmroot -n root
+BTRFS="/dev/lvmroot/root"
+
+
+# Formatting the LVM partition as BTRFS.
+#echo "Formatting the LUKS container as BTRFS."
+# mkfs.btrfs $BTRFS &>/dev/null
+# mount -o clear_cache,nospace_cache $BTRFS /mnt
 
 # Creating BTRFS subvolumes.
 echo "Creating BTRFS subvolumes."
@@ -107,8 +116,6 @@ btrfs su cr /mnt/@/var_crash &>/dev/null
 btrfs su cr /mnt/@/var_cache &>/dev/null
 btrfs su cr /mnt/@/var_tmp &>/dev/null
 btrfs su cr /mnt/@/var_spool &>/dev/null
-btrfs su cr /mnt/@/var_lib_libvirt_images &>/dev/null
-btrfs su cr /mnt/@/var_lib_machines &>/dev/null
 btrfs su cr /mnt/@/var_lib_gdm &>/dev/null
 btrfs su cr /mnt/@/var_lib_AccountsService &>/dev/null
 btrfs su cr /mnt/@/cryptkey &>/dev/null
@@ -121,8 +128,6 @@ chattr +C /mnt/@/var_crash
 chattr +C /mnt/@/var_cache
 chattr +C /mnt/@/var_tmp
 chattr +C /mnt/@/var_spool
-chattr +C /mnt/@/var_lib_libvirt_images
-chattr +C /mnt/@/var_lib_machines
 chattr +C /mnt/@/var_lib_gdm
 chattr +C /mnt/@/var_lib_AccountsService
 chattr +C /mnt/@/cryptkey
@@ -167,8 +172,6 @@ mount -o ssd,noatime,space_cache=v2,autodefrag,compress=zstd:15,discard=async,no
 mount -o ssd,noatime,space_cache=v2,autodefrag,compress=zstd:15,discard=async,nodatacow,nodev,nosuid,subvol=@/var_tmp $BTRFS /mnt/var/tmp
 
 mount -o ssd,noatime,space_cache=v2,autodefrag,compress=zstd:15,discard=async,nodatacow,nodev,nosuid,noexec,subvol=@/var_spool $BTRFS /mnt/var/spool
-mount -o ssd,noatime,space_cache=v2,autodefrag,compress=zstd:15,discard=async,nodatacow,nodev,nosuid,noexec,subvol=@/var_lib_libvirt_images $BTRFS /mnt/var/lib/libvirt/images
-mount -o ssd,noatime,space_cache=v2,autodefrag,compress=zstd:15,discard=async,nodatacow,nodev,nosuid,noexec,subvol=@/var_lib_machines $BTRFS /mnt/var/lib/machines
 
 # GNOME requires /var/lib/gdm and /var/lib/AccountsService to be writeable when booting into a readonly snapshot. Thus we sadly have to split them.
 mount -o ssd,noatime,space_cache=v2,autodefrag,compress=zstd:15,discard=async,nodatacow,nodev,nosuid,noexec,subvol=@/var_lib_gdm $BTRFS /mnt/var/lib/gdm
@@ -184,7 +187,7 @@ kernel_selector
 
 # Pacstrap (setting up a base sytem onto the new root).
 echo "Installing the base system (it may take a while)."
-pacstrap /mnt base ${kernel} ${microcode} linux-firmware grub grub-btrfs snapper snap-pac efibootmgr sudo networkmanager apparmor python-psutil nano gdm gnome-control-center gnome-terminal xorg gnome-tweaks nautilus pipewire-pulse pipewire-alsa pipewire-jack firewalld zram-generator adobe-source-han-sans-otc-fonts adobe-source-han-serif-otc-fonts gnu-free-fonts reflector mlocate man-db
+pacstrap /mnt base ${kernel} ${microcode} linux-firmware grub grub-btrfs snapper snap-pac efibootmgr sudo networkmanager apparmor python-psutil nano gdm gnome-control-center gnome-terminal xorg gnome-tweaks nautilus pipewire-pulse pipewire-alsa pipewire-jack flatpak firewalld lvm2 adobe-source-han-sans-otc-fonts adobe-source-han-serif-otc-fonts gnu-free-fonts reflector mlocate man-db
 
 # Routing jack2 through PipeWire.
 echo "/usr/lib/pipewire-0.3/jack" > /mnt/etc/ld.so.conf.d/pipewire-jack.conf
@@ -221,7 +224,7 @@ echo "KEYMAP=$kblayout" > /mnt/etc/vconsole.conf
 # Configuring /etc/mkinitcpio.conf
 echo "Configuring /etc/mkinitcpio for ZSTD compression and LUKS hook."
 sed -i 's,#COMPRESSION="zstd",COMPRESSION="zstd",g' /mnt/etc/mkinitcpio.conf
-sed -i 's,modconf block filesystems keyboard,keyboard modconf block encrypt filesystems,g' /mnt/etc/mkinitcpio.conf
+sed -i 's,modconf block filesystems keyboard,keyboard modconf block encrypt lvm2 filesystems,g' /mnt/etc/mkinitcpio.conf
 
 # Enabling LUKS in GRUB and setting the UUID of the LUKS container.
 UUID=$(blkid $cryptroot | cut -f2 -d'"')
@@ -288,16 +291,6 @@ account		required	pam_unix.so
 session		required	pam_unix.so
 EOF
 
-
-# ZRAM configuration 
-bash -c 'cat > /mnt/etc/systemd/zram-generator.conf' <<-'EOF'
-[zram0]
-zram-fraction = 1
-max-zram-size = MEMSIZE
-EOF
-sed s/MEMSIZE/$(free -m | grep -oP '\d+' | head -n 1)/g  /mnt/etc/systemd/zram-generator.conf
-
-
 # Randomize Mac Address.
 bash -c 'cat > /mnt/etc/NetworkManager/conf.d/00-macrandomize.conf' <<-'EOF'
 [device]
@@ -309,15 +302,6 @@ connection.stable-id=${CONNECTION}/${BOOT}
 EOF
 
 chmod 600 /mnt/etc/NetworkManager/conf.d/00-macrandomize.conf
-
-# Disable Connectivity Check.
-bash -c 'cat > /mnt/etc/NetworkManager/conf.d/20-connectivity.conf' <<-'EOF'
-[connectivity]
-uri=http://www.archlinux.org/check_network_status.txt
-interval=0
-EOF
-
-chmod 600 /mnt/etc/NetworkManager/conf.d/20-connectivity.conf
 
 # Enable IPv6 privacy extensions
 bash -c 'cat > /mnt/etc/NetworkManager/conf.d/ip6-privacy.conf' <<-'EOF'
