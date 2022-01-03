@@ -192,7 +192,7 @@ gcc -O2 -o btrfs_map_physical btrfs_map_physical.c
 
 kernel_selector
 
-PHYSICAL_OFFSET=$(btrfs_map_physical /mnt/swap/.swapfile | awk 'NR==2 { print $7 }' )
+PHYSICAL_OFFSET=$(./btrfs_map_physical /mnt/swap/.swapfile | awk 'NR==2 { print $7 }' )
 PAGESIZE=$(getconf PAGESIZE)
 RESUME_OFFSET=$(($PHYSICAL_OFFSET / $PAGESIZE))
 
