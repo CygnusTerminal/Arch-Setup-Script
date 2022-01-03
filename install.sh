@@ -189,11 +189,12 @@ mkswap /mnt/swap/.swapfile
 swapon /mnt/swap/.swapfile
 curl https://raw.githubusercontent.com/osandov/osandov-linux/master/scripts/btrfs_map_physical.c >> btrfs_map_physical.c
 gcc -O2 -o btrfs_map_physical btrfs_map_physical.c
+
+kernel_selector
+
 PHYSICAL_OFFSET=$(btrfs_map_physical /mnt/swap/.swapfile | awk 'NR==2 { print $7 }' )
 PAGESIZE=$(getconf PAGESIZE)
 RESUME_OFFSET=$(($PHYSICAL_OFFSET / $PAGESIZE))
-
-kernel_selector
 
 # Pacstrap (setting up a base sytem onto the new root).
 echo "Installing the base system (it may take a while)."
