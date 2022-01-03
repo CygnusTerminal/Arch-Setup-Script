@@ -113,7 +113,7 @@ btrfs su cr /mnt/@/var_spool &>/dev/null
 btrfs su cr /mnt/@/var_lib_gdm &>/dev/null
 btrfs su cr /mnt/@/var_lib_AccountsService &>/dev/null
 btrfs su cr /mnt/@/cryptkey &>/dev/null
-btrfs su cr /mnt/@/swapfile &>/dev/null
+btrfs su cr /mnt/@/swap &>/dev/null
 
 chattr +C /mnt/@/boot
 chattr +C /mnt/@/srv
@@ -126,7 +126,7 @@ chattr +C /mnt/@/var_spool
 chattr +C /mnt/@/var_lib_gdm
 chattr +C /mnt/@/var_lib_AccountsService
 chattr +C /mnt/@/cryptkey
-chattr +C /mnt/@/swapfile
+chattr +C /mnt/@/swap
 
 #Set the default BTRFS Subvol to Snapshot 1 before pacstrapping
 btrfs subvolume set-default "$(btrfs subvolume list /mnt | grep "@/.snapshots/1/snapshot" | grep -oP '(?<=ID )[0-9]+')" /mnt
@@ -148,7 +148,7 @@ chmod 600 /mnt/@/.snapshots/1/info.xml
 umount /mnt
 echo "Mounting the newly created subvolumes."
 mount -o ssd,noatime,space_cache,compress=zstd:15 $BTRFS /mnt
-mkdir -p /mnt/{boot,root,home,.snapshots,srv,tmp,/var/log,/var/crash,/var/cache,/var/tmp,/var/spool,/var/lib/libvirt/images,/var/lib/machines,/var/lib/gdm,/var/lib/AccountsService,/cryptkey}
+mkdir -p /mnt/{boot,root,home,.snapshots,srv,tmp,/var/log,/var/crash,/var/cache,/var/tmp,/var/spool,/var/lib/gdm,/var/lib/AccountsService,/cryptkey,/swap}
 mount -o ssd,noatime,space_cache=v2,autodefrag,compress=zstd:15,discard=async,nodev,nosuid,noexec,subvol=@/boot $BTRFS /mnt/boot
 mount -o ssd,noatime,space_cache=v2,autodefrag,compress=zstd:15,discard=async,nodev,nosuid,subvol=@/root $BTRFS /mnt/root 
 mount -o ssd,noatime,space_cache=v2.autodefrag,compress=zstd:15,discard=async,nodev,nosuid,subvol=@/home $BTRFS /mnt/home
@@ -175,20 +175,20 @@ mount -o ssd,noatime,space_cache=v2,autodefrag,compress=zstd:15,discard=async,no
 
 # The encryption is split as we do not want to include it in the backup with snap-pac.
 mount -o ssd,noatime,space_cache=v2,autodefrag,compress=zstd:15,discard=async,nodatacow,nodev,nosuid,noexec,subvol=@/cryptkey $BTRFS /mnt/cryptkey
-mount -o ssd,noatime,space_cache=v2,autodefrag,compress=zstd:15,discard=none,nodatacow,subvol=@/swapfile $BTRFS /mnt/swapfile
+mount -o ssd,noatime,space_cache=v2,autodefrag,compress=zstd:15,discard=none,nodatacow,subvol=@/swap $BTRFS /mnt/swap
 
 mkdir -p /mnt/boot/efi
 mount -o nodev,nosuid,noexec $ESP /mnt/boot/efi
 
 # Swap configuration
 TOTALMEM=$(free -m | awk '/Mem\:/ { print $2 }')
-dd if=/dev/zero of=/mnt/swapfile/.swapfile bs=1M count=$TOTALMEM status=progress
-chmod 600 /swapfile/.swapfile
-mkswap /mnt/swapfile/.swapfile
-swapon /mnt/swapfile/.swapfile
+dd if=/dev/zero of=/mnt/swap/.swapfile bs=1M count=$TOTALMEM status=progress
+chmod 600 /swap/.swapfile
+mkswap /mnt/swap/.swapfile
+swapon /mnt/swap/.swapfile
 curl https://raw.githubusercontent.com/osandov/osandov-linux/master/scripts/btrfs_map_physical.c >> btrfs_map_physical.c
 gcc -O2 -o btrfs_map_physical btrfs_map_physical.c
-PHYSICAL_OFFSET=$(btrfs_map_physical /mnt/swapfile/.swapfile | awk 'NR==2 { print $7 }' )
+PHYSICAL_OFFSET=$(btrfs_map_physical /mnt/swap/.swapfile | awk 'NR==2 { print $7 }' )
 PAGESIZE=$(getconf PAGESIZE)
 RESUME_OFFSET=$(($PHYSICAL_OFFSET / $PAGESIZE))
 
