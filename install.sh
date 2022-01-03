@@ -4,6 +4,7 @@
 clear
 
 # Updating the live environment usually causes more problems than its worth, and quite often can't be done without remounting cowspace with more capacity, especially at the end of any given month.
+mount -o remount,size=2G /run/archiso/cowspace 
 sed -i 's/#Color/Color/g' /etc/pacman.conf
 sed -i 's/#VerbosePkgLists/VerbosePkgLists/g' /etc/pacman.conf
 sed -i 's/#ParallelDownloads = 5/ParallelDownloads = 5/g' /etc/pacman.conf
