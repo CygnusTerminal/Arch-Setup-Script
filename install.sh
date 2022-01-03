@@ -181,9 +181,9 @@ mkdir -p /mnt/boot/efi
 mount -o nodev,nosuid,noexec $ESP /mnt/boot/efi
 
 # Swap configuration
-TOTALMEM=$(free -m | awk '/Mem\:/ { print $2 }')
+TOTALMEM=$(free -m | awk '/Mem:/ { print $2 }')
 dd if=/dev/zero of=/mnt/swap/.swapfile bs=1M count=$TOTALMEM status=progress
-chmod 600 /swap/.swapfile
+chmod 600 /mnt/swap/.swapfile
 mkswap /mnt/swap/.swapfile
 swapon /mnt/swap/.swapfile
 curl https://raw.githubusercontent.com/osandov/osandov-linux/master/scripts/btrfs_map_physical.c >> btrfs_map_physical.c
