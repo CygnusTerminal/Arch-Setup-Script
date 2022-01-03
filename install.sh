@@ -327,13 +327,11 @@ EOF
 
 chmod 600 /mnt/etc/NetworkManager/conf.d/ip6-privacy.conf
 
-# Lower Swappiness if system has more than 8GB of RAM
-if $(($TOTALMEM <= 8192)); then ;
-else
+# Lower Swappiness
 bash -c 'cat > /mnt/etc/sysctl.d/99-swappiness.conf' <<-'EOF'
 vm.swappiness=10
-EOF ;
-fi
+EOF
+
 
 # Configuring the system.
 arch-chroot /mnt /bin/bash -e <<EOF
